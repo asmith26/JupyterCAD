@@ -101,6 +101,7 @@ export class MainView extends React.Component<IProps, IStates> {
     this._pointer = new THREE.Vector2();
     this._collaboratorPointers = {};
     this._model.themeChanged.connect(this._handleThemeChange, this);
+    this._dimensionLinesGroup = new THREE.Group();
 
     this._mainViewModel.jcadModel.sharedOptionsChanged.connect(
       this._onSharedOptionsChanged,
@@ -207,6 +208,8 @@ export class MainView extends React.Component<IProps, IStates> {
     this._mainViewModel.dispose();
 
     document.removeEventListener('keydown', this._keyDownHandler);
+    this._dimensionLinesGroup.clear();
+    this._scene.remove(this._dimensionLinesGroup);
   }
 
   addContextMenu = (): void => {
@@ -557,6 +560,8 @@ export class MainView extends React.Component<IProps, IStates> {
       this._transformControls.setSpace('local');
       this._transformControls.enabled = false;
       this._transformControls.visible = false;
+
+      this._scene.add(this._dimensionLinesGroup);
 
       this._createViewHelper();
     }
@@ -1330,6 +1335,7 @@ export class MainView extends React.Component<IProps, IStates> {
 
     // Set new selection
     this._selectedMeshes = [];
+    this._dimensionLinesGroup.clear();
     if (selectedNames.length === 1) {
       const selectedMeshName = selectedNames[0];
       if (!selectedMeshName.startsWith('edge')) {
@@ -1344,25 +1350,151 @@ export class MainView extends React.Component<IProps, IStates> {
           ) as THREE.Mesh;
 
           if (boundingBox && boundingBox.userData.size) {
-            const size = boundingBox.userData.size;
-            boundingBox.updateWorldMatrix(true, false); // Make sure matrix is updated
+            const size = boundingBox.userData.size as THREE.Vector3;
+            boundingBox.updateWorldMatrix(true, false);
             const matrix = boundingBox.matrixWorld;
 
-            const positions = [
-              new THREE.Vector3(0, -size.y / 2, -size.z / 2), // Midpoint of an edge parallel to X
-              new THREE.Vector3(-size.x / 2, 0, -size.z / 2), // Midpoint of an edge parallel to Y
-              new THREE.Vector3(-size.x / 2, -size.y / 2, 0) // Midpoint of an edge parallel to Z
+            const labels: { text: string; position: THREE.Vector3 }[] = [];
+            const dimensionLines = new THREE.Group();
+
+            const offset = Math.max(size.x, size.y, size.z) / 7;
+            const lineMaterial = new THREE.LineBasicMaterial({
+              color: BOUNDING_BOX_COLOR,
+              depthTest: false,
+              transparent: true,
+              opacity: 0.7
+            });
+
+            const createLine = (points: THREE.Vector3[]) => {
+              const geometry = new THREE.BufferGeometry().setFromPoints(points);
+              const line = new THREE.Line(geometry, lineMaterial);
+              line.renderOrder = 1;
+              return line;
+            };
+
+            const tickSize = offset / 3;
+
+            // X Dimension
+            const xPoints = [
+              new THREE.Vector3(-size.x / 2, -size.y / 2 - offset, -size.z / 2),
+              new THREE.Vector3(size.x / 2, -size.y / 2 - offset, -size.z / 2)
             ];
+            dimensionLines.add(createLine(xPoints));
+            dimensionLines.add(
+              createLine([
+                new THREE.Vector3(
+                  xPoints[0].x,
+                  xPoints[0].y - tickSize,
+                  xPoints[0].z
+                ),
+                new THREE.Vector3(
+                  xPoints[0].x,
+                  xPoints[0].y + tickSize,
+                  xPoints[0].z
+                )
+              ])
+            );
+            dimensionLines.add(
+              createLine([
+                new THREE.Vector3(
+                  xPoints[1].x,
+                  xPoints[1].y - tickSize,
+                  xPoints[1].z
+                ),
+                new THREE.Vector3(
+                  xPoints[1].x,
+                  xPoints[1].y + tickSize,
+                  xPoints[1].z
+                )
+              ])
+            );
+            labels.push({
+              text: `${size.x.toFixed(3)}`,
+              position: new THREE.Vector3(0, -size.y / 2 - offset, -size.z / 2)
+            });
 
-            const labels = [
-              `X: ${size.x.toFixed(3)}`,
-              `Y: ${size.y.toFixed(3)}`,
-              `Z: ${size.z.toFixed(3)}`
-            ].map((text, i) => ({
-              text,
-              position: positions[i].applyMatrix4(matrix)
-            }));
+            // Y Dimension
+            const yPoints = [
+              new THREE.Vector3(-size.x / 2 - offset, -size.y / 2, -size.z / 2),
+              new THREE.Vector3(-size.x / 2 - offset, size.y / 2, -size.z / 2)
+            ];
+            dimensionLines.add(createLine(yPoints));
+            dimensionLines.add(
+              createLine([
+                new THREE.Vector3(
+                  yPoints[0].x - tickSize,
+                  yPoints[0].y,
+                  yPoints[0].z
+                ),
+                new THREE.Vector3(
+                  yPoints[0].x + tickSize,
+                  yPoints[0].y,
+                  yPoints[0].z
+                )
+              ])
+            );
+            dimensionLines.add(
+              createLine([
+                new THREE.Vector3(
+                  yPoints[1].x - tickSize,
+                  yPoints[1].y,
+                  yPoints[1].z
+                ),
+                new THREE.Vector3(
+                  yPoints[1].x + tickSize,
+                  yPoints[1].y,
+                  yPoints[1].z
+                )
+              ])
+            );
+            labels.push({
+              text: `${size.y.toFixed(3)}`,
+              position: new THREE.Vector3(-size.x / 2 - offset, 0, -size.z / 2)
+            });
 
+            // Z Dimension
+            const zPoints = [
+              new THREE.Vector3(size.x / 2 + offset, -size.y / 2, -size.z / 2),
+              new THREE.Vector3(size.x / 2 + offset, -size.y / 2, size.z / 2)
+            ];
+            dimensionLines.add(createLine(zPoints));
+            dimensionLines.add(
+              createLine([
+                new THREE.Vector3(
+                  zPoints[0].x - tickSize,
+                  zPoints[0].y,
+                  zPoints[0].z
+                ),
+                new THREE.Vector3(
+                  zPoints[0].x + tickSize,
+                  zPoints[0].y,
+                  zPoints[0].z
+                )
+              ])
+            );
+            dimensionLines.add(
+              createLine([
+                new THREE.Vector3(
+                  zPoints[1].x - tickSize,
+                  zPoints[1].y,
+                  zPoints[1].z
+                ),
+                new THREE.Vector3(
+                  zPoints[1].x + tickSize,
+                  zPoints[1].y,
+                  zPoints[1].z
+                )
+              ])
+            );
+            labels.push({
+              text: `${size.z.toFixed(3)}`,
+              position: new THREE.Vector3(size.x / 2 + offset, -size.y / 2, 0)
+            });
+
+            dimensionLines.applyMatrix4(matrix);
+            this._dimensionLinesGroup.add(dimensionLines);
+
+            labels.forEach(label => label.position.applyMatrix4(matrix));
             this.setState({ boundingBoxLabels: labels });
           } else {
             this.setState({ boundingBoxLabels: null });
@@ -2330,4 +2462,5 @@ export class MainView extends React.Component<IProps, IStates> {
     | THREE.OrthographicCamera
     | undefined = undefined; // Threejs camera
   private _keyDownHandler: (event: KeyboardEvent) => void;
+  private _dimensionLinesGroup: THREE.Group;
 }
