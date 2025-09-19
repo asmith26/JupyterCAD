@@ -356,6 +356,7 @@ export function buildShape(options: {
   boundingBox.visible = false;
   boundingBox.renderOrder = 1;
   boundingBox.name = SELECTION_BOUNDING_BOX;
+  boundingBox.userData.size = { x: size.x, y: size.y, z: size.z };
   meshGroup.add(boundingBox);
 
   meshGroup.add(mainMesh);

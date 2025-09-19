@@ -81,6 +81,7 @@ interface IStates {
   rotationSnapValue: number;
   translationSnapValue: number;
   transformMode: string | undefined;
+  boundingBoxLabels: { text: string; position: THREE.Vector3 }[] | null;
 }
 
 interface ILineIntersection extends THREE.Intersection {
@@ -131,7 +132,8 @@ export class MainView extends React.Component<IProps, IStates> {
       explodedViewFactor: 0,
       rotationSnapValue: 10,
       translationSnapValue: 1,
-      transformMode: 'translate'
+      transformMode: 'translate',
+      boundingBoxLabels: null
     };
 
     this._model.settingsChanged.connect(this._handleSettingsChange, this);
@@ -378,6 +380,7 @@ export class MainView extends React.Component<IProps, IStates> {
 
       this._controls.addEventListener('change', () => {
         this._updateAnnotation();
+        this._updateBoundingBoxLabels();
       });
 
       this._controls.addEventListener(
@@ -729,6 +732,27 @@ export class MainView extends React.Component<IProps, IStates> {
         el.style.left = `${Math.round(screenPosition.x)}px`;
         el.style.top = `${Math.round(screenPosition.y)}px`;
       }
+    });
+  }
+
+  private _updateBoundingBoxLabels() {
+    this.state.boundingBoxLabels?.forEach((label, index) => {
+      const el = document.getElementById(`jcad-bbox-label-${index}`);
+      if (el) {
+        const screenPosition = this._computeScreenPosition(label.position);
+        el.style.left = `${Math.round(screenPosition.x)}px`;
+        el.style.top = `${Math.round(screenPosition.y)}px`;
+      }
+    });
+  }
+
+  private _computeScreenPosition(vector: THREE.Vector3): THREE.Vector2 {
+    const canvas = this._renderer.domElement;
+    return projectVector({
+      vector,
+      camera: this._camera,
+      width: canvas.width,
+      height: canvas.height
     });
   }
 
@@ -1306,6 +1330,52 @@ export class MainView extends React.Component<IProps, IStates> {
 
     // Set new selection
     this._selectedMeshes = [];
+    if (selectedNames.length === 1) {
+      const selectedMeshName = selectedNames[0];
+      if (!selectedMeshName.startsWith('edge')) {
+        const selectedMesh = this._meshGroup?.getObjectByName(
+          selectedMeshName
+        ) as BasicMesh;
+
+        if (selectedMesh?.parent) {
+          const parentGroup = selectedMesh.parent as THREE.Group;
+          const boundingBox = parentGroup?.getObjectByName(
+            SELECTION_BOUNDING_BOX
+          ) as THREE.Mesh;
+
+          if (boundingBox && boundingBox.userData.size) {
+            const size = boundingBox.userData.size;
+            boundingBox.updateWorldMatrix(true, false); // Make sure matrix is updated
+            const matrix = boundingBox.matrixWorld;
+
+            const positions = [
+              new THREE.Vector3(0, -size.y / 2, -size.z / 2), // Midpoint of an edge parallel to X
+              new THREE.Vector3(-size.x / 2, 0, -size.z / 2), // Midpoint of an edge parallel to Y
+              new THREE.Vector3(-size.x / 2, -size.y / 2, 0) // Midpoint of an edge parallel to Z
+            ];
+
+            const labels = [
+              `X: ${size.x.toFixed(3)}`,
+              `Y: ${size.y.toFixed(3)}`,
+              `Z: ${size.z.toFixed(3)}`
+            ].map((text, i) => ({
+              text,
+              position: positions[i].applyMatrix4(matrix)
+            }));
+
+            this.setState({ boundingBoxLabels: labels });
+          } else {
+            this.setState({ boundingBoxLabels: null });
+          }
+        } else {
+          this.setState({ boundingBoxLabels: null });
+        }
+      } else {
+        this.setState({ boundingBoxLabels: null });
+      }
+    } else {
+      this.setState({ boundingBoxLabels: null });
+    }
 
     for (const selectionName of selectedNames) {
       const selectedMesh = this._meshGroup?.getObjectByName(
@@ -1998,6 +2068,29 @@ export class MainView extends React.Component<IProps, IStates> {
       >
         <Spinner loading={this.state.loading} />
         <FollowIndicator remoteUser={this.state.remoteUser} />
+        {this.state.boundingBoxLabels?.map((label, index) => {
+          const screenPosition = this._computeScreenPosition(label.position);
+          return (
+            <div
+              id={`jcad-bbox-label-${index}`}
+              key={`jcad-bbox-label-${index}`}
+              style={{
+                position: 'absolute',
+                left: screenPosition.x,
+                top: screenPosition.y,
+                color: 'white',
+                backgroundColor: 'rgba(0,0,0,0.7)',
+                padding: '2px 5px',
+                borderRadius: '3px',
+                fontSize: '12px',
+                pointerEvents: 'none',
+                transform: 'translate(-50%, -50%)' // Center the label on the point
+              }}
+            >
+              {label.text}
+            </div>
+          );
+        })}
         {Object.entries(this.state.annotations).map(([key, annotation]) => {
           if (!this._model.annotationModel) {
             return null;
