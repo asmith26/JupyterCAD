@@ -22,6 +22,7 @@ import { TransformControls } from 'three/examples/jsm/controls/TransformControls
 import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader';
 import { ViewHelper } from 'three/examples/jsm/helpers/ViewHelper';
+import { LineSegments2 } from 'three/examples/jsm/lines/LineSegments2';
 
 import { FloatingAnnotation } from '../annotation';
 import { getCSSVariableColor, throttle } from '../tools';
@@ -101,7 +102,6 @@ export class MainView extends React.Component<IProps, IStates> {
     this._pointer = new THREE.Vector2();
     this._collaboratorPointers = {};
     this._model.themeChanged.connect(this._handleThemeChange, this);
-    this._dimensionLinesGroup = new THREE.Group();
 
     this._mainViewModel.jcadModel.sharedOptionsChanged.connect(
       this._onSharedOptionsChanged,
@@ -208,8 +208,10 @@ export class MainView extends React.Component<IProps, IStates> {
     this._mainViewModel.dispose();
 
     document.removeEventListener('keydown', this._keyDownHandler);
-    this._dimensionLinesGroup.clear();
-    this._scene.remove(this._dimensionLinesGroup);
+    if (this._dimensionLinesGroup) {
+      this._dimensionLinesGroup.clear();
+      this._scene.remove(this._dimensionLinesGroup);
+    }
   }
 
   addContextMenu = (): void => {
@@ -561,6 +563,7 @@ export class MainView extends React.Component<IProps, IStates> {
       this._transformControls.enabled = false;
       this._transformControls.visible = false;
 
+      this._dimensionLinesGroup = new THREE.Group();
       this._scene.add(this._dimensionLinesGroup);
 
       this._createViewHelper();
@@ -829,7 +832,7 @@ export class MainView extends React.Component<IProps, IStates> {
     this._raycaster.setFromCamera(this._pointer, this._camera);
 
     const intersects = this._raycaster.intersectObjects(
-      this._meshGroup.children
+      this._meshGroup.children, true
     );
 
     if (intersects.length > 0) {
@@ -1319,7 +1322,7 @@ export class MainView extends React.Component<IProps, IStates> {
         boundingBox.visible = false;
       }
 
-      if (!parentGroup.userData.jcObject.visible) {
+      if (parentGroup && !parentGroup.userData.jcObject.visible) {
         parentGroup.visible = false;
         selectedMesh.material.opacity = 1;
         selectedMesh.material.transparent = false;
@@ -1335,10 +1338,43 @@ export class MainView extends React.Component<IProps, IStates> {
 
     // Set new selection
     this._selectedMeshes = [];
-    this._dimensionLinesGroup.clear();
+    if (this._dimensionLinesGroup) {
+      this._dimensionLinesGroup.clear();
+    }
     if (selectedNames.length === 1) {
       const selectedMeshName = selectedNames[0];
-      if (!selectedMeshName.startsWith('edge')) {
+      if (selectedMeshName.startsWith('edge')) {
+        const selectedEdge = this._meshGroup?.getObjectByName(
+          selectedMeshName
+        ) as LineSegments2;
+        if (selectedEdge && selectedEdge.parent) {
+          const geometry = selectedEdge.geometry;
+          const startAttr = geometry.attributes.instanceStart;
+          const endAttr = geometry.attributes.instanceEnd;
+
+          const p1 = new THREE.Vector3().fromBufferAttribute(startAttr, 0);
+          const p2 = new THREE.Vector3().fromBufferAttribute(endAttr, 0);
+
+          selectedEdge.parent.updateWorldMatrix(true, false);
+          const matrix = selectedEdge.parent.matrixWorld;
+
+          p1.applyMatrix4(matrix);
+          p2.applyMatrix4(matrix);
+
+          const length = p1.distanceTo(p2);
+          const midPoint = p1.clone().lerp(p2, 0.5);
+
+          const labels = [
+            {
+              text: `Length: ${length.toFixed(3)}`,
+              position: midPoint
+            }
+          ];
+          this.setState({ boundingBoxLabels: labels });
+        } else {
+          this.setState({ boundingBoxLabels: null });
+        }
+      } else {
         const selectedMesh = this._meshGroup?.getObjectByName(
           selectedMeshName
         ) as BasicMesh;
@@ -1492,18 +1528,14 @@ export class MainView extends React.Component<IProps, IStates> {
             });
 
             dimensionLines.applyMatrix4(matrix);
-            this._dimensionLinesGroup.add(dimensionLines);
+            this._dimensionLinesGroup?.add(dimensionLines);
 
             labels.forEach(label => label.position.applyMatrix4(matrix));
             this.setState({ boundingBoxLabels: labels });
           } else {
             this.setState({ boundingBoxLabels: null });
           }
-        } else {
-          this.setState({ boundingBoxLabels: null });
         }
-      } else {
-        this.setState({ boundingBoxLabels: null });
       }
     } else {
       this.setState({ boundingBoxLabels: null });
@@ -1543,7 +1575,7 @@ export class MainView extends React.Component<IProps, IStates> {
         const parentGroup = this._meshGroup?.getObjectByName(selectedMesh.name)
           ?.parent as THREE.Group;
 
-        if (!parentGroup.userData.jcObject.visible) {
+        if (parentGroup && !parentGroup.userData.jcObject.visible) {
           parentGroup.visible = true;
           selectedMesh.material.opacity = 0.5;
           selectedMesh.material.transparent = true;
@@ -2462,5 +2494,5 @@ export class MainView extends React.Component<IProps, IStates> {
     | THREE.OrthographicCamera
     | undefined = undefined; // Threejs camera
   private _keyDownHandler: (event: KeyboardEvent) => void;
-  private _dimensionLinesGroup: THREE.Group;
+  private _dimensionLinesGroup: THREE.Group | null = null;
 }
