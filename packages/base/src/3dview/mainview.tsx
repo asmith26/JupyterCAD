@@ -907,8 +907,10 @@ export class MainView extends React.Component<IProps, IStates> {
 
       const newSelection: { [key: string]: ISelection } = {};
       for (const name of names) {
-        newSelection[name] = this._meshGroup?.getObjectByName(name)
-          ?.userData as ISelection;
+        const mesh = this._meshGroup?.getObjectByName(name);
+        if (mesh) {
+          newSelection[name] = mesh.userData as ISelection;
+        }
       }
       this._updateSelected(newSelection);
       this._model.syncSelected(newSelection, this._mainViewModel.id);
@@ -1352,21 +1354,34 @@ export class MainView extends React.Component<IProps, IStates> {
           const startAttr = geometry.attributes.instanceStart;
           const endAttr = geometry.attributes.instanceEnd;
 
-          const p1 = new THREE.Vector3().fromBufferAttribute(startAttr, 0);
-          const p2 = new THREE.Vector3().fromBufferAttribute(endAttr, 0);
-
           selectedEdge.parent.updateWorldMatrix(true, false);
           const matrix = selectedEdge.parent.matrixWorld;
 
-          p1.applyMatrix4(matrix);
-          p2.applyMatrix4(matrix);
+          let totalLength = 0;
+          const p1 = new THREE.Vector3();
+          const p2 = new THREE.Vector3();
+          const allPoints: THREE.Vector3[] = [];
 
-          const length = p1.distanceTo(p2);
-          const midPoint = p1.clone().lerp(p2, 0.5);
+          for (let i = 0; i < startAttr.count; i++) {
+            p1.fromBufferAttribute(startAttr, i);
+            p2.fromBufferAttribute(endAttr, i);
+
+            p1.applyMatrix4(matrix);
+            p2.applyMatrix4(matrix);
+
+            allPoints.push(p1.clone());
+            allPoints.push(p2.clone());
+
+            totalLength += p1.distanceTo(p2);
+          }
+
+          const edgeBoundingBox = new THREE.Box3().setFromPoints(allPoints);
+          const midPoint = new THREE.Vector3();
+          edgeBoundingBox.getCenter(midPoint);
 
           const labels = [
             {
-              text: `Length: ${length.toFixed(3)}`,
+              text: `Length: ${totalLength.toFixed(3)}`,
               position: midPoint
             }
           ];
