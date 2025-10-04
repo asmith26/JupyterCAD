@@ -55,7 +55,6 @@ import {
   projectVector,
   IMouseDrag,
   IMeshGroupMetadata,
-  getQuaternion,
   SPLITVIEW_BACKGROUND_COLOR,
   SPLITVIEW_BACKGROUND_COLOR_CSS
 } from './helpers';
@@ -533,43 +532,52 @@ export class MainView extends React.Component<IProps, IStates> {
       });
       // Update the currently transformed object in the shared model once finished moving
       this._transformControls.addEventListener('mouseUp', async () => {
-        const updatedObject = this._selectedMeshes[0];
-
-        const objectName = updatedObject.name;
-
-        const updatedPosition = new THREE.Vector3();
-        updatedObject.getWorldPosition(updatedPosition);
-        const updatedQuaternion = new THREE.Quaternion();
-        updatedObject.getWorldQuaternion(updatedQuaternion);
-
-        const s = Math.sqrt(1 - updatedQuaternion.w * updatedQuaternion.w);
-
-        let updatedRotation;
-        if (s > 1e-6) {
-          updatedRotation = [
-            [
-              updatedQuaternion.x / s,
-              updatedQuaternion.y / s,
-              updatedQuaternion.z / s
-            ],
-            2 * Math.acos(updatedQuaternion.w) * (180 / Math.PI)
-          ];
-        } else {
-          updatedRotation = [[0, 0, 1], 0];
+        const controlObject = this._transformControls.object;
+        if (!controlObject) {
+          return;
         }
 
-        const obj = this._model.sharedModel.getObjectByName(objectName);
+        const objectGroups = this._transformGroup
+          ? [...this._transformGroup.children]
+          : [controlObject];
 
-        if (obj && obj.parameters && obj.parameters.Placement) {
-          const newPosition = [
-            updatedPosition.x,
-            updatedPosition.y,
-            updatedPosition.z
-          ];
+        const updates: { name: string; params: any }[] = [];
+        for (const group of objectGroups) {
+          const metadata = group.userData as IMeshGroupMetadata;
+          if (!metadata.jcObject) {
+            continue;
+          }
+          const name = metadata.jcObject.name;
+          const obj = this._model.sharedModel.getObjectByName(name);
+          if (!obj || !obj.parameters?.Placement) {
+            continue;
+          }
 
-          const done = await this._mainViewModel.maybeUpdateObjectParameters(
-            objectName,
-            {
+          const updatedPosition = new THREE.Vector3();
+          group.getWorldPosition(updatedPosition);
+          const updatedQuaternion = new THREE.Quaternion();
+          group.getWorldQuaternion(updatedQuaternion);
+
+          const s = Math.sqrt(1 - updatedQuaternion.w * updatedQuaternion.w);
+          let updatedRotation: any[];
+          if (s > 1e-6) {
+            updatedRotation = [
+              [
+                updatedQuaternion.x / s,
+                updatedQuaternion.y / s,
+                updatedQuaternion.z / s
+              ],
+              2 * Math.acos(updatedQuaternion.w) * (180 / Math.PI)
+            ];
+          } else {
+            updatedRotation = [[0, 0, 1], 0];
+          }
+
+          const newPosition = updatedPosition.toArray();
+
+          updates.push({
+            name,
+            params: {
               ...obj.parameters,
               Placement: {
                 ...obj.parameters.Placement,
@@ -578,25 +586,20 @@ export class MainView extends React.Component<IProps, IStates> {
                 Angle: updatedRotation[1]
               }
             }
+          });
+        }
+
+        if (this._transformGroup) {
+          this._transformControls.detach();
+          objectGroups.forEach(child =>
+            this._meshGroup!.attach(child as THREE.Object3D)
           );
-          // If the dry run failed, we bring back the object to its original position
-          if (!done && updatedObject.parent) {
-            const origPosition = obj.parameters.Placement.Position;
+          this._scene.remove(this._transformGroup);
+          this._transformGroup = null;
+        }
 
-            // Undo positioning
-            updatedObject.parent.position.copy(new THREE.Vector3(0, 0, 0));
-            updatedObject.parent.applyQuaternion(updatedQuaternion.invert());
-
-            // Redo original positioning
-            updatedObject.parent.applyQuaternion(getQuaternion(obj));
-            updatedObject.parent.position.copy(
-              new THREE.Vector3(
-                origPosition[0],
-                origPosition[1],
-                origPosition[2]
-              )
-            );
-          }
+        for (const u of updates) {
+          await this._mainViewModel.maybeUpdateObjectParameters(u.name, u.params);
         }
       });
       this._scene.add(this._transformControls);
@@ -1504,58 +1507,67 @@ export class MainView extends React.Component<IProps, IStates> {
     this._updateTransformControls(selectedNames);
   }
 
-  /*
+  /**
    * Attach the transform controls to the current selection, or detach it
    */
   private _updateTransformControls(selection: string[]) {
-    if (selection.length === 1 && !this._explodedView.enabled) {
-      const selectedMeshName = selection[0];
-
-      if (selectedMeshName.startsWith('edge')) {
-        const selectedMesh = this._meshGroup?.getObjectByName(
-          selectedMeshName
-        ) as BasicMesh;
-
-        if (selectedMesh.parent?.name) {
-          const parentName = selectedMesh.parent.name;
-
-          // Not using getObjectByName, we want the full group
-          // TODO Improve this detection of the full group. startsWith looks brittle
-          const parent = this._meshGroup?.children.find(child =>
-            child.name.startsWith(parentName)
-          );
-
-          if (parent) {
-            this._transformControls.attach(parent as BasicMesh);
-
-            this._transformControls.visible = this.state.transform;
-            this._transformControls.enabled = this.state.transform;
-          }
-        }
-        return;
-      }
-
-      // Not using getObjectByName, we want the full group
-      // TODO Improve this detection of the full group. startsWith looks brittle
-      const selectedMesh = this._meshGroup?.children.find(child =>
-        child.name.startsWith(selectedMeshName)
-      );
-
-      if (selectedMesh) {
-        this._transformControls.attach(selectedMesh as BasicMesh);
-
-        this._transformControls.visible = this.state.transform;
-        this._transformControls.enabled = this.state.transform;
-
-        return;
-      }
+    if (this._transformGroup) {
+      // Using attach to preserve world transform while reparenting
+      this._transformGroup.children.forEach(child => this._meshGroup!.attach(child));
+      this._scene.remove(this._transformGroup);
+      this._transformGroup = null;
     }
-
-    // Detach TransformControls from the previous selection
     this._transformControls.detach();
-
     this._transformControls.visible = false;
     this._transformControls.enabled = false;
+
+    if (
+      !this.state.transform ||
+      selection.length === 0 ||
+      this._explodedView.enabled
+    ) {
+      return;
+    }
+
+    const selectedGroups = [
+      ...new Set(
+        selection
+          .map(selectedName => {
+            const mesh = this._meshGroup?.getObjectByName(selectedName); // recursive search
+            return mesh?.parent as THREE.Group;
+          })
+          .filter(parent => parent && parent.parent === this._meshGroup)
+      )
+    ];
+
+    if (selectedGroups.length === 0) {
+      return;
+    }
+
+    if (selectedGroups.length === 1) {
+      this._transformControls.attach(selectedGroups[0]);
+    } else {
+      this._transformGroup = new THREE.Group();
+      this._scene.add(this._transformGroup);
+
+      const box = new THREE.Box3();
+      selectedGroups.forEach(group => {
+        box.expandByObject(group);
+      });
+      const center = new THREE.Vector3();
+      box.getCenter(center);
+
+      this._transformGroup.position.copy(center);
+      this._transformGroup.updateWorldMatrix(true, false);
+
+      selectedGroups.forEach(group => {
+        this._transformGroup!.attach(group);
+      });
+      this._transformControls.attach(this._transformGroup);
+    }
+
+    this._transformControls.visible = true;
+    this._transformControls.enabled = true;
   }
 
   /**
@@ -2169,7 +2181,7 @@ export class MainView extends React.Component<IProps, IStates> {
         if (key === 'rotationSnapValue' && value <= 0) {
           return;
         }
-        this.setState({ [key]: value } as Pick<this['state'], typeof key>);
+        this.setState({ [key]: value } as any);
       }
     };
 
@@ -2429,6 +2441,7 @@ export class MainView extends React.Component<IProps, IStates> {
   }; // Current mouse drag
   private _clipPlaneTransformControls: TransformControls; // Clip plane position/rotation controls
   private _transformControls: TransformControls; // Mesh position controls
+  private _transformGroup: THREE.Group | null = null;
   private _pointer3D: IPointer | null = null;
   private _clock: THREE.Clock;
   private _targetPosition: THREE.Vector3 | null = null;
