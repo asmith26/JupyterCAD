@@ -532,6 +532,7 @@ export class MainView extends React.Component<IProps, IStates> {
       });
       // Update the currently transformed object in the shared model once finished moving
       this._transformControls.addEventListener('mouseUp', async () => {
+        // Get the object currently being transformed by the controls.
         const controlObject = this._transformControls.object;
         if (!controlObject) {
           return;
@@ -540,19 +541,23 @@ export class MainView extends React.Component<IProps, IStates> {
         const objectGroups = this._transformGroup
           ? [...this._transformGroup.children]
           : [controlObject];
-
+        // Prepare an array to store updates for each object's parameters.
         const updates: { name: string; params: any }[] = [];
         for (const group of objectGroups) {
+          // Retrieve metadata associated with the group.
           const metadata = group.userData as IMeshGroupMetadata;
           if (!metadata.jcObject) {
             continue;
           }
+          // Get the object's name and its corresponding shared model object.
           const name = metadata.jcObject.name;
           const obj = this._model.sharedModel.getObjectByName(name);
+          // Skip if the object doesn't exist or doesn't have placement parameters.
           if (!obj || !obj.parameters?.Placement) {
             continue;
           }
 
+          // Get the updated world position and quaternion (rotation) of the group.
           const updatedPosition = new THREE.Vector3();
           group.getWorldPosition(updatedPosition);
           const updatedQuaternion = new THREE.Quaternion();
@@ -560,6 +565,7 @@ export class MainView extends React.Component<IProps, IStates> {
 
           const s = Math.sqrt(1 - updatedQuaternion.w * updatedQuaternion.w);
           let updatedRotation: any[];
+          // Convert quaternion to axis-angle representation for rotation.
           if (s > 1e-6) {
             updatedRotation = [
               [
@@ -573,6 +579,7 @@ export class MainView extends React.Component<IProps, IStates> {
             updatedRotation = [[0, 0, 1], 0];
           }
 
+          // Convert the updated position to an array.
           const newPosition = updatedPosition.toArray();
 
           updates.push({
@@ -588,16 +595,18 @@ export class MainView extends React.Component<IProps, IStates> {
             }
           });
         }
-
+        // Detach the transform controls from the object(s).
+        this._transformControls.detach();
+        // If a transform group was used, remove it from the scene.
         if (this._transformGroup) {
-          this._transformControls.detach();
-          objectGroups.forEach(child =>
-            this._meshGroup!.attach(child as THREE.Object3D)
-          );
           this._scene.remove(this._transformGroup);
           this._transformGroup = null;
+        } else {
+          // Otherwise, remove the single control object from its parent.
+          controlObject.parent?.remove(controlObject);
         }
-
+        // Apply all collected updates to the object parameters in the main view model.
+        // This will trigger a re-render of the scene with the new positions/rotations.
         for (const u of updates) {
           await this._mainViewModel.maybeUpdateObjectParameters(u.name, u.params);
         }
@@ -1511,16 +1520,24 @@ export class MainView extends React.Component<IProps, IStates> {
    * Attach the transform controls to the current selection, or detach it
    */
   private _updateTransformControls(selection: string[]) {
+    // If there's an existing transform group (for multi-object transformation),
+    // detach its children and remove it from the scene.
     if (this._transformGroup) {
       // Using attach to preserve world transform while reparenting
-      this._transformGroup.children.forEach(child => this._meshGroup!.attach(child));
+      // We need to iterate over a copy of the array, because `attach` will modify it.
+      [...this._transformGroup.children].forEach(child =>
+        this._meshGroup!.attach(child)
+      );
       this._scene.remove(this._transformGroup);
       this._transformGroup = null;
     }
+    // Detach transform controls from any object, hide them, and disable them.
     this._transformControls.detach();
     this._transformControls.visible = false;
     this._transformControls.enabled = false;
 
+    // If transformation is disabled, no objects are selected, or exploded view is active,
+    // then transformation controls should not be active.
     if (
       !this.state.transform ||
       selection.length === 0 ||
@@ -1529,27 +1546,36 @@ export class MainView extends React.Component<IProps, IStates> {
       return;
     }
 
+    // Get the unique parent groups of the selected meshes.
+    // We only consider groups that are direct children of `_meshGroup`.
     const selectedGroups = [
       ...new Set(
         selection
           .map(selectedName => {
-            const mesh = this._meshGroup?.getObjectByName(selectedName); // recursive search
+            // Find the mesh by name (can be recursive)
+            const mesh = this._meshGroup?.getObjectByName(selectedName);
+            // Return its parent, which should be a group
             return mesh?.parent as THREE.Group;
           })
+          // Filter out invalid parents and ensure they are direct children of _meshGroup
           .filter(parent => parent && parent.parent === this._meshGroup)
       )
     ];
 
+    // If no valid groups are selected, return.
     if (selectedGroups.length === 0) {
       return;
     }
 
+    // If only one group is selected, attach transform controls directly to it.
     if (selectedGroups.length === 1) {
       this._transformControls.attach(selectedGroups[0]);
     } else {
+      // If multiple groups are selected, create a new temporary group to control them all.
       this._transformGroup = new THREE.Group();
       this._scene.add(this._transformGroup);
 
+      // Calculate the bounding box of all selected groups to find their center.
       const box = new THREE.Box3();
       selectedGroups.forEach(group => {
         box.expandByObject(group);
@@ -1557,15 +1583,18 @@ export class MainView extends React.Component<IProps, IStates> {
       const center = new THREE.Vector3();
       box.getCenter(center);
 
+      // Set the position of the temporary transform group to the center of the selected objects.
       this._transformGroup.position.copy(center);
       this._transformGroup.updateWorldMatrix(true, false);
 
+      // Attach all selected groups to the temporary transform group.
       selectedGroups.forEach(group => {
         this._transformGroup!.attach(group);
       });
       this._transformControls.attach(this._transformGroup);
     }
 
+    // Make transform controls visible and enabled.
     this._transformControls.visible = true;
     this._transformControls.enabled = true;
   }
