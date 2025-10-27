@@ -1,0 +1,24 @@
+{// LAUNCH ORDER: `jlpm run build` or `jlpm run watch`; `jupyter lab`; Run below config in VSCode
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug JupyterCAD frontend",
+            "type": "pwa-chrome",
+            "request": "launch",
+            "module": "jupyter",
+            "url": "http://localhost:8888/lab?reset",
+            "webRoot": "${workspaceFolder}",
+            "sourceMaps": true,
+            "sourceMapPathOverrides": {
+                "webpack://@jupytercad/jupytercad-app/./src/*": "${workspaceFolder}/python/jupytercad_app/src/*",
+                "webpack://@jupytercad/jupytercad-core/./src/*": "${workspaceFolder}/python/jupytercad_core/src/*",
+                "webpack://@jupytercad/jupytercad-lab/./src/*": "${workspaceFolder}/python/jupytercad_lab/src/*",
+                "webpack://@jupytercad/base/./src/*": "${workspaceFolder}/packages/base/src/*",
+                "webpack://@jupytercad/occ-worker/./src/*": "${workspaceFolder}/packages/occ-worker/src/*",
+                "webpack://@jupytercad/opencascade/./src/*": "${workspaceFolder}/packages/opencascade/src/*",
+                "webpack://@jupytercad/schema/./src/*": "${workspaceFolder}/packages/schema/src/*",
+            },
+            "runtimeArgs": ["--remote-debugging-port=9222"]
+        }
+    ]
+}
