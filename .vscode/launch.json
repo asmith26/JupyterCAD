@@ -1,24 +1,22 @@
-{// LAUNCH ORDER: `jlpm run build` or `jlpm run watch`; `jupyter lab`; Run below config in VSCode
-    "version": "0.2.0",
-    "configurations": [
-        {
-            "name": "Debug JupyterCAD frontend",
-            "type": "pwa-chrome",
-            "request": "launch",
-            "module": "jupyter",
-            "url": "http://localhost:8888/lab?reset",
-            "webRoot": "${workspaceFolder}",
-            "sourceMaps": true,
-            "sourceMapPathOverrides": {
-                "webpack://@jupytercad/jupytercad-app/./src/*": "${workspaceFolder}/python/jupytercad_app/src/*",
-                "webpack://@jupytercad/jupytercad-core/./src/*": "${workspaceFolder}/python/jupytercad_core/src/*",
-                "webpack://@jupytercad/jupytercad-lab/./src/*": "${workspaceFolder}/python/jupytercad_lab/src/*",
-                "webpack://@jupytercad/base/./src/*": "${workspaceFolder}/packages/base/src/*",
-                "webpack://@jupytercad/occ-worker/./src/*": "${workspaceFolder}/packages/occ-worker/src/*",
-                "webpack://@jupytercad/opencascade/./src/*": "${workspaceFolder}/packages/opencascade/src/*",
-                "webpack://@jupytercad/schema/./src/*": "${workspaceFolder}/packages/schema/src/*",
-            },
-            "runtimeArgs": ["--remote-debugging-port=9222"]
-        }
-    ]
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug JL Extension",
+      "type": "pwa-chrome",
+      "request": "launch",
+      "url": "http://localhost:8888/lab",
+      "webRoot": "${workspaceFolder}",
+      "sourceMapPathOverrides": {
+        "webpack://@jupytercad/jupytercad-app/*": "${workspaceFolder}/python/jupytercad_app/*",
+        "webpack://@jupytercad/jupytercad-lab/*": "${workspaceFolder}/python/jupytercad_lab/*",
+        "webpack://@jupytercad/jupytercad-core/*": "${workspaceFolder}/python/jupytercad_core/*",
+        "webpack://@jupytercad/base/*": "${workspaceFolder}/packages/base/*",
+        "webpack://@jupytercad/occ-worker/*": "${workspaceFolder}/packages/occ-worker/*",
+        "webpack://@jupytercad/opencascade/*": "${workspaceFolder}/packages/opencascade/*",
+        "webpack://@jupytercad/schema/*": "${workspaceFolder}/packages/schema/*",
+      }
+    }
+  ]
 }
+

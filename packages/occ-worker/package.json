@@ -24,7 +24,7 @@
     "url": "https://github.com/jupytercad/JupyterCAD.git"
   },
   "scripts": {
-    "build:lib": "tsc -b",
+    "build:lib": "tsc --sourceMap",
     "build": "jlpm build:lib && webpack --config worker.webpack.config.js --mode=development && jlpm run build:remove_full_occ_wasm",
     "build:prod": "jlpm build:lib && webpack --config worker.webpack.config.js --mode=production && jlpm run build:remove_full_occ_wasm",
     "build:remove_full_occ_wasm": "rimraf lib/opencascade.full.wasm",
