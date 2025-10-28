@@ -1,4 +1,4 @@
-{
+{// LAUNCH ORDER: `jlpm run build` or `jlpm run watch`; `jupyter lab`; Run below config in VSCode
   "version": "0.2.0",
   "configurations": [
     {
