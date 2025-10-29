@@ -30,7 +30,7 @@
     "build:schema:js": "json2ts -i src/schema -o src/_interface --no-unknownAny --unreachableDefinitions --cwd ./src/schema && cd src/schema && node ../../schema.js",
     "build:schema:py": "datamodel-codegen --input ./src/schema --output ../../python/jupytercad_core/jupytercad_core/schema/interfaces --output-model-type pydantic_v2.BaseModel --input-file-type jsonschema",
     "build:prod": "jlpm run clean && jlpm build:schema && jlpm run build:lib",
-    "build:lib": "tsc --sourceMap",
+    "build:lib": "tsc",
     "clean": "rimraf tsconfig.tsbuildinfo",
     "clean:lib": "rimraf lib tsconfig.tsbuildinfo",
     "clean:all": "jlpm run clean:lib",

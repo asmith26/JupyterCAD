@@ -27,7 +27,7 @@
     "url": "https://github.com/jupytercad/JupyterCAD.git"
   },
   "scripts": {
-    "build": "tsc --sourceMap",
+    "build": "tsc -b",
     "build:prod": "jlpm run clean && jlpm run build",
     "clean": "rimraf tsconfig.tsbuildinfo",
     "clean:lib": "rimraf lib tsconfig.tsbuildinfo",

@@ -28,7 +28,7 @@
     "url": "https://github.com/jupytercad/JupyterCAD.git"
   },
   "scripts": {
-    "build": "tsc --sourceMap && node build_opencascade_wasm.js",
+    "build": "tsc && node build_opencascade_wasm.js",
     "build:prod": "tsc && node build_opencascade_wasm.js",
     "clean": "rimraf tsconfig.tsbuildinfo lib"
   },
