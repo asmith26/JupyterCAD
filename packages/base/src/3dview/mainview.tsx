@@ -597,8 +597,14 @@ export class MainView extends React.Component<IProps, IStates> {
         }
         // Detach the transform controls from the object(s).
         this._transformControls.detach();
-        // If a transform group was used, remove it from the scene.
+        // If a transform group was used, reattach its children back to the
+        // mesh group so they remain in the scene graph (preserving world
+        // transforms), then remove the temporary transform group.
         if (this._transformGroup) {
+          // Use a copy of children because attach will modify the children array.
+          [...this._transformGroup.children].forEach(child =>
+            this._meshGroup!.attach(child)
+          );
           this._scene.remove(this._transformGroup);
           this._transformGroup = null;
         } else {
@@ -1028,6 +1034,19 @@ export class MainView extends React.Component<IProps, IStates> {
    */
   private _shapeToMesh = (payload: IDisplayShape['payload']['result']) => {
     // Clear existing meshes.
+    // If a temporary transform group exists (from a multi-select transform),
+    // remove it first so its children (the old instances of selected objects)
+    // don't persist and cause duplicates when we recreate `_meshGroup`.
+    if (this._transformGroup) {
+      // Detach transform controls and disable them.
+      this._transformControls.detach();
+      this._transformControls.visible = false;
+      this._transformControls.enabled = false;
+      // Remove the temporary group from the scene.
+      this._scene.remove(this._transformGroup);
+      this._transformGroup = null;
+    }
+
     if (this._meshGroup !== null) {
       this._scene.remove(this._meshGroup);
     }
