@@ -1068,12 +1068,15 @@ export class MainView extends React.Component<IProps, IStates> {
       this._updatePointersScale(this._refLength);
 
       if (updateCamera) {
-        this._camera.lookAt(this._scene.position);
+        const center = new THREE.Vector3();
+        this._boundingGroup.getCenter(center);
+        this._camera.lookAt(center);  // Set the camera to look at the center of the bounding box group
+        this._controls.target.copy(center);  // Set the orbit controls to orbit around the center of the bounding box group
 
         this._camera.position.set(
-          10 * this._refLength,
-          10 * this._refLength,
-          10 * this._refLength
+          center.x + 10 * this._refLength,
+          center.y + 10 * this._refLength,
+          center.z + 10 * this._refLength
         );
       }
 
