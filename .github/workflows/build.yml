@@ -73,7 +73,7 @@ jobs:
         shell: bash -l {0}
         run: |
           set -eux
-          pip install hatch
+          pip install build
           yarn build:packages
 
       - name: Upload extension packages
@@ -87,6 +87,33 @@ jobs:
             python/jupytercad/dist/jupytercad*
             python/jupytercad_lite/dist/jupytercad*
           if-no-files-found: error
+
+  fresh_yarn_lock_test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Install Conda environment with Micromamba
+        uses: mamba-org/setup-micromamba@v2
+        with:
+          environment-name: gis
+          create-args: >-
+            pip
+            jupyterlab=4
+            yarn=3
+
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install build deps
+        shell: bash -l {0}
+        run: pip install -r requirements-build.txt
+
+      - name: Build with a fresh yarn
+        shell: bash -l {0}
+        run: |
+          rm yarn.lock
+          jlpm
+          jlpm run build:prod
 
   test_isolated:
     needs: build
@@ -112,7 +139,7 @@ jobs:
           sudo rm -rf $(which node)
 
           cp ./jupytercad_core/dist/jupytercad*.whl ./jupytercad_lab/dist/jupytercad*.whl ./jupytercad_app/dist/jupytercad*.whl .
-          python -m pip install "jupyterlab==4.4.2" jupytercad*.whl
+          python -m pip install "jupyterlab==4.5.1" jupytercad*.whl
 
           jupyter labextension list
           jupyter labextension list 2>&1 | grep -ie "jupytercad.*OK"
@@ -171,9 +198,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: jupytercad-playwright-tests
-          path: |
-            ui-tests/test-results
-            ui-tests/playwright-report
+          path: ui-tests
 
       - name: Save artifact data
         if: always()
@@ -208,7 +233,7 @@ jobs:
           create-args: >-
             python=3.12
             pip
-            jupyterlab==4.4.2
+            jupyterlab==4.5.1
             jupyterlite-core
             jupyterlite-xeus
             jupyter_server
