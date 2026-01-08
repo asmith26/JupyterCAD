@@ -1,0 +1,27 @@
+{// LAUNCH ORDER: `jlpm run build` or `jlpm run watch`; `jupyter lab`; Run below config in VSCode
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug JL Extension",
+      "type": "pwa-chrome",
+      "request": "launch",
+      "url": "http://localhost:8888/lab",
+      "webRoot": "${workspaceFolder}",
+      "sourceMapPathOverrides": {
+        "webpack://@jupytercad/jupytercad-app/*": "${workspaceFolder}/python/jupytercad_app/*",
+        "webpack://@jupytercad/jupytercad-lab/*": "${workspaceFolder}/python/jupytercad_lab/*",
+        "webpack://@jupytercad/jupytercad-core/*": "${workspaceFolder}/python/jupytercad_core/*",
+        
+        "webpack://@jupytercad/base/*": "${workspaceFolder}/packages/base/*",
+        "webpack://@jupytercad/jupytercad-core/@jupytercad/occ-worker/*": "${workspaceFolder}/packages/occ-worker/*",
+        "webpack://@jupytercad/jupytercad-core/@jupytercad/opencascade/*": "${workspaceFolder}/packages/opencascade/*",
+        "webpack://@jupytercad/schema/*": "${workspaceFolder}/packages/schema/*",
+
+        // THESE ALSO WORK:
+        // "webpack://@jupytercad/jupytercad-core/@jupytercad/base/*": "${workspaceFolder}/packages/base/*",
+        // "webpack://@jupytercad/jupytercad-core/@jupytercad/schema/*": "${workspaceFolder}/packages/schema/*",
+      }
+    }
+  ]
+}
+
