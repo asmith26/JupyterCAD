@@ -1,3 +1,8 @@
+/**
+ * This file contains the implementation of the MainView component, which is the main 3D view for JupyterCAD.
+ * It uses React and Three.js to render the 3D scene, and handles user interactions,
+ * collaboration features, and communication with the main application model.
+ */
 import { MapChange } from '@jupyter/ydoc';
 import {
   IAnnotation,
@@ -50,47 +55,60 @@ import {
   projectVector,
   IMouseDrag,
   IMeshGroupMetadata,
-  getQuaternion,
   SPLITVIEW_BACKGROUND_COLOR,
   SPLITVIEW_BACKGROUND_COLOR_CSS
 } from './helpers';
 import { MainViewModel } from './mainviewmodel';
 import { Spinner } from './spinner';
+
+/**
+ * Props for the MainView component.
+ */
 interface IProps {
   viewModel: MainViewModel;
 }
 
+// Constants for the camera's near and far clipping planes.
 const CAMERA_NEAR = 1e-6;
 const CAMERA_FAR = 1e27;
 
-// The amount of pixels a mouse move can do until we stop considering it's a click
+// The maximum number of pixels the mouse can move before a drag is initiated instead of a click.
 const CLICK_THRESHOLD = 5;
 
+/**
+ * State for the MainView component.
+ */
 interface IStates {
-  id: string; // ID of the component, it is used to identify which component
-  //is the source of awareness updates.
-  loading: boolean;
-  remoteUser?: User.IIdentity | null;
-  annotations: IDict<IAnnotation>;
-  firstLoad: boolean;
-  wireframe: boolean;
-  transform: boolean;
-  clipEnabled: boolean;
-  explodedViewEnabled: boolean;
-  explodedViewFactor: number;
-  rotationSnapValue: number;
-  translationSnapValue: number;
-  transformMode: string | undefined;
+  id: string; // ID of the component, used to identify the source of awareness updates.
+  loading: boolean; // Whether the scene is currently loading.
+  remoteUser?: User.IIdentity | null; // The remote user being followed, if any.
+  annotations: IDict<IAnnotation>; // A dictionary of annotations in the scene.
+  firstLoad: boolean; // Whether this is the first time the component is loading.
+  wireframe: boolean; // Whether wireframe mode is enabled.
+  transform: boolean; // Whether transform controls are enabled.
+  clipEnabled: boolean; // Whether clipping is enabled.
+  explodedViewEnabled: boolean; // Whether exploded view is enabled.
+  explodedViewFactor: number; // The factor for the exploded view.
+  rotationSnapValue: number; // The value for rotation snapping.
+  translationSnapValue: number; // The value for translation snapping.
+  transformMode: string | undefined; // The current transform mode ('translate' or 'rotate').
 }
 
+/**
+ * An extension of the Three.js Intersection interface to include a point on a line.
+ */
 interface ILineIntersection extends THREE.Intersection {
   pointOnLine?: THREE.Vector3;
 }
 
+/**
+ * The main 3D view component for JupyterCAD.
+ */
 export class MainView extends React.Component<IProps, IStates> {
   constructor(props: IProps) {
     super(props);
 
+    // Initialize Three.js objects and view model connections.
     this._geometry = new THREE.BufferGeometry();
     this._geometry.setDrawRange(0, 3 * 10000);
 
@@ -101,6 +119,7 @@ export class MainView extends React.Component<IProps, IStates> {
     this._collaboratorPointers = {};
     this._model.themeChanged.connect(this._handleThemeChange, this);
 
+    // Connect to signals from the JupyterCAD model.
     this._mainViewModel.jcadModel.sharedOptionsChanged.connect(
       this._onSharedOptionsChanged,
       this
@@ -119,6 +138,7 @@ export class MainView extends React.Component<IProps, IStates> {
 
     this._raycaster.params.Line2 = { threshold: 50 };
 
+    // Initialize component state.
     this.state = {
       id: this._mainViewModel.id,
       loading: true,
@@ -137,11 +157,15 @@ export class MainView extends React.Component<IProps, IStates> {
     this._model.settingsChanged.connect(this._handleSettingsChange, this);
   }
 
+  /**
+   * Called when the component is mounted.
+   */
   componentDidMount(): void {
     this.generateScene();
     this.addContextMenu();
     this._mainViewModel.initWorker();
     this._mainViewModel.initSignal();
+    // Listen for custom events to focus on specific objects.
     window.addEventListener('jupytercadObjectSelection', (e: Event) => {
       const customEvent = e as CustomEvent;
 
@@ -149,10 +173,12 @@ export class MainView extends React.Component<IProps, IStates> {
         this.lookAtPosition(customEvent.detail.objPosition);
       }
     });
+    // Initialize transform controls snapping.
     this._transformControls.rotationSnap = THREE.MathUtils.degToRad(
       this.state.rotationSnapValue
     );
     this._transformControls.translationSnap = this.state.translationSnapValue;
+    // Add keyboard event listener for transform mode switching.
     this._keyDownHandler = (event: KeyboardEvent) => {
       if (event.key === 'r') {
         const newMode = this._transformControls.mode || 'translate';
@@ -164,8 +190,14 @@ export class MainView extends React.Component<IProps, IStates> {
     document.addEventListener('keydown', this._keyDownHandler);
   }
 
+  /**
+   * Called when the component's props or state are updated.
+   * @param oldProps The old props.
+   * @param oldState The old state.
+   */
   componentDidUpdate(oldProps: IProps, oldState: IStates): void {
     this.resizeCanvasToDisplaySize();
+    // Update transform controls snapping if the values have changed.
     if (oldState.rotationSnapValue !== this.state.rotationSnapValue) {
       this._transformControls.rotationSnap = THREE.MathUtils.degToRad(
         this.state.rotationSnapValue
@@ -176,7 +208,11 @@ export class MainView extends React.Component<IProps, IStates> {
     }
   }
 
+  /**
+   * Called when the component is about to be unmounted.
+   */
   componentWillUnmount(): void {
+    // Clean up resources and event listeners.
     window.cancelAnimationFrame(this._requestID);
     window.removeEventListener('resize', this._handleWindowResize);
     this._mainViewModel.viewSettingChanged.disconnect(
@@ -207,6 +243,9 @@ export class MainView extends React.Component<IProps, IStates> {
     document.removeEventListener('keydown', this._keyDownHandler);
   }
 
+  /**
+   * Adds a context menu to the 3D view.
+   */
   addContextMenu = (): void => {
     const commands = new CommandRegistry();
     commands.addCommand('add-annotation', {
@@ -258,14 +297,19 @@ export class MainView extends React.Component<IProps, IStates> {
     });
   };
 
+  /**
+   * Sets up the Three.js scene.
+   */
   sceneSetup = (): void => {
     if (this._divRef.current !== null) {
+      // Set default colors from CSS variables.
       DEFAULT_MESH_COLOR.set(getCSSVariableColor(DEFAULT_MESH_COLOR_CSS));
       DEFAULT_EDGE_COLOR.set(getCSSVariableColor(DEFAULT_EDGE_COLOR_CSS));
       BOUNDING_BOX_COLOR.set(getCSSVariableColor(BOUNDING_BOX_COLOR_CSS));
       SPLITVIEW_BACKGROUND_COLOR.set(
         getCSSVariableColor(SPLITVIEW_BACKGROUND_COLOR_CSS)
       );
+      // Initialize the camera based on settings.
       if (this._mainViewModel.viewSettings.cameraSettings) {
         const cameraSettings = this._mainViewModel.viewSettings
           .cameraSettings as CameraSettings;
@@ -293,6 +337,7 @@ export class MainView extends React.Component<IProps, IStates> {
 
       this._scene = new THREE.Scene();
 
+      // Add lights to the scene.
       this._ambientLight = new THREE.AmbientLight(0xffffff, 0.5); // soft white light
       this._scene.add(this._ambientLight);
 
@@ -303,6 +348,7 @@ export class MainView extends React.Component<IProps, IStates> {
 
       this._scene.add(this._camera);
 
+      // Initialize the WebGL renderer.
       this._renderer = new THREE.WebGLRenderer({
         alpha: true,
         antialias: true,
@@ -311,12 +357,12 @@ export class MainView extends React.Component<IProps, IStates> {
       });
 
       this._clock = new THREE.Clock();
-      // this._renderer.setPixelRatio(window.devicePixelRatio);
       this._renderer.autoClear = false;
       this._renderer.setClearColor(0x000000, 0);
       this._renderer.setSize(500, 500, false);
       this._divRef.current.appendChild(this._renderer.domElement); // mount using React ref
 
+      // Throttle pointer synchronization to avoid overwhelming the network.
       this._syncPointer = throttle(
         (position: THREE.Vector3 | undefined, parent: string | undefined) => {
           if (position && parent) {
@@ -346,7 +392,7 @@ export class MainView extends React.Component<IProps, IStates> {
         this._onKeyDown(e);
       });
 
-      // Not enabling damping since it makes the syncing between cameraL and camera trickier
+      // Initialize orbit controls for camera manipulation.
       this._controls = new OrbitControls(
         this._camera,
         this._renderer.domElement
@@ -358,6 +404,7 @@ export class MainView extends React.Component<IProps, IStates> {
         this._scene.position.z
       );
 
+      // Add mouse event listeners for click and drag detection.
       this._renderer.domElement.addEventListener('mousedown', e => {
         this._mouseDrag.start.set(e.clientX, e.clientY);
         this._mouseDrag.button = e.button;
@@ -380,6 +427,7 @@ export class MainView extends React.Component<IProps, IStates> {
         this._updateAnnotation();
       });
 
+      // Throttle camera synchronization.
       this._controls.addEventListener(
         'change',
         throttle(() => {
@@ -473,6 +521,7 @@ export class MainView extends React.Component<IProps, IStates> {
       this._clipPlaneTransformControls.enabled = false;
       this._clipPlaneTransformControls.visible = false;
 
+      // Initialize transform controls for object manipulation.
       this._transformControls = new TransformControls(
         this._camera,
         this._renderer.domElement
@@ -483,43 +532,59 @@ export class MainView extends React.Component<IProps, IStates> {
       });
       // Update the currently transformed object in the shared model once finished moving
       this._transformControls.addEventListener('mouseUp', async () => {
-        const updatedObject = this._selectedMeshes[0];
-
-        const objectName = updatedObject.name;
-
-        const updatedPosition = new THREE.Vector3();
-        updatedObject.getWorldPosition(updatedPosition);
-        const updatedQuaternion = new THREE.Quaternion();
-        updatedObject.getWorldQuaternion(updatedQuaternion);
-
-        const s = Math.sqrt(1 - updatedQuaternion.w * updatedQuaternion.w);
-
-        let updatedRotation;
-        if (s > 1e-6) {
-          updatedRotation = [
-            [
-              updatedQuaternion.x / s,
-              updatedQuaternion.y / s,
-              updatedQuaternion.z / s
-            ],
-            2 * Math.acos(updatedQuaternion.w) * (180 / Math.PI)
-          ];
-        } else {
-          updatedRotation = [[0, 0, 1], 0];
+        // Get the object currently being transformed by the controls.
+        const controlObject = this._transformControls.object;
+        if (!controlObject) {
+          return;
         }
 
-        const obj = this._model.sharedModel.getObjectByName(objectName);
+        const objectGroups = this._transformGroup
+          ? [...this._transformGroup.children]
+          : [controlObject];
+        // Prepare an array to store updates for each object's parameters.
+        const updates: { name: string; params: any }[] = [];
+        for (const group of objectGroups) {
+          // Retrieve metadata associated with the group.
+          const metadata = group.userData as IMeshGroupMetadata;
+          if (!metadata.jcObject) {
+            continue;
+          }
+          // Get the object's name and its corresponding shared model object.
+          const name = metadata.jcObject.name;
+          const obj = this._model.sharedModel.getObjectByName(name);
+          // Skip if the object doesn't exist or doesn't have placement parameters.
+          if (!obj || !obj.parameters?.Placement) {
+            continue;
+          }
 
-        if (obj && obj.parameters && obj.parameters.Placement) {
-          const newPosition = [
-            updatedPosition.x,
-            updatedPosition.y,
-            updatedPosition.z
-          ];
+          // Get the updated world position and quaternion (rotation) of the group.
+          const updatedPosition = new THREE.Vector3();
+          group.getWorldPosition(updatedPosition);
+          const updatedQuaternion = new THREE.Quaternion();
+          group.getWorldQuaternion(updatedQuaternion);
 
-          const done = await this._mainViewModel.maybeUpdateObjectParameters(
-            objectName,
-            {
+          const s = Math.sqrt(1 - updatedQuaternion.w * updatedQuaternion.w);
+          let updatedRotation: any[];
+          // Convert quaternion to axis-angle representation for rotation.
+          if (s > 1e-6) {
+            updatedRotation = [
+              [
+                updatedQuaternion.x / s,
+                updatedQuaternion.y / s,
+                updatedQuaternion.z / s
+              ],
+              2 * Math.acos(updatedQuaternion.w) * (180 / Math.PI)
+            ];
+          } else {
+            updatedRotation = [[0, 0, 1], 0];
+          }
+
+          // Convert the updated position to an array.
+          const newPosition = updatedPosition.toArray();
+
+          updates.push({
+            name,
+            params: {
               ...obj.parameters,
               Placement: {
                 ...obj.parameters.Placement,
@@ -528,25 +593,28 @@ export class MainView extends React.Component<IProps, IStates> {
                 Angle: updatedRotation[1]
               }
             }
+          });
+        }
+        // Detach the transform controls from the object(s).
+        this._transformControls.detach();
+        // If a transform group was used, reattach its children back to the
+        // mesh group so they remain in the scene graph (preserving world
+        // transforms), then remove the temporary transform group.
+        if (this._transformGroup) {
+          // Use a copy of children because attach will modify the children array.
+          [...this._transformGroup.children].forEach(child =>
+            this._meshGroup!.attach(child)
           );
-          // If the dry run failed, we bring back the object to its original position
-          if (!done && updatedObject.parent) {
-            const origPosition = obj.parameters.Placement.Position;
-
-            // Undo positioning
-            updatedObject.parent.position.copy(new THREE.Vector3(0, 0, 0));
-            updatedObject.parent.applyQuaternion(updatedQuaternion.invert());
-
-            // Redo original positioning
-            updatedObject.parent.applyQuaternion(getQuaternion(obj));
-            updatedObject.parent.position.copy(
-              new THREE.Vector3(
-                origPosition[0],
-                origPosition[1],
-                origPosition[2]
-              )
-            );
-          }
+          this._scene.remove(this._transformGroup);
+          this._transformGroup = null;
+        } else {
+          // Otherwise, remove the single control object from its parent.
+          controlObject.parent?.remove(controlObject);
+        }
+        // Apply all collected updates to the object parameters in the main view model.
+        // This will trigger a re-render of the scene with the new positions/rotations.
+        for (const u of updates) {
+          await this._mainViewModel.maybeUpdateObjectParameters(u.name, u.params);
         }
       });
       this._scene.add(this._transformControls);
@@ -559,6 +627,9 @@ export class MainView extends React.Component<IProps, IStates> {
     }
   };
 
+  /**
+   * Creates the axes helper and adds it to the scene.
+   */
   private _createAxesHelper() {
     if (this._refLength) {
       this._sceneAxe?.removeFromParent();
@@ -572,6 +643,9 @@ export class MainView extends React.Component<IProps, IStates> {
     }
   }
 
+  /**
+   * Creates the view helper (the cube in the corner) and adds it to the DOM.
+   */
   private _createViewHelper() {
     // Remove the existing ViewHelperDiv if it already exists
     if (
@@ -602,10 +676,14 @@ export class MainView extends React.Component<IProps, IStates> {
     );
   }
 
+  /**
+   * The main animation loop.
+   */
   animate = (): void => {
     this._requestID = window.requestAnimationFrame(this.animate);
     const delta = this._clock.getDelta();
 
+    // Update edge material resolution.
     for (const material of this._edgeMaterials) {
       material.resolution.set(
         this._renderer.domElement.width,
@@ -613,6 +691,7 @@ export class MainView extends React.Component<IProps, IStates> {
       );
     }
 
+    // Update clipping plane mesh position.
     if (this._clippingPlaneMesh !== null) {
       this._clippingPlane.coplanarPoint(this._clippingPlaneMesh.position);
       this._clippingPlaneMesh.lookAt(
@@ -629,6 +708,7 @@ export class MainView extends React.Component<IProps, IStates> {
     this._renderer.setRenderTarget(null);
     this._renderer.clear();
 
+    // Handle split screen rendering.
     if (this._sceneL && this._cameraL) {
       this._cameraL.matrixWorld.copy(this._camera.matrixWorld);
       this._cameraL.matrixWorld.decompose(
@@ -660,6 +740,9 @@ export class MainView extends React.Component<IProps, IStates> {
     this.updateCameraRotation();
   };
 
+  /**
+   * Resizes the canvas to match the display size.
+   */
   resizeCanvasToDisplaySize = (): void => {
     if (this._divRef.current !== null) {
       this._renderer.setSize(
@@ -667,6 +750,7 @@ export class MainView extends React.Component<IProps, IStates> {
         this._divRef.current.clientHeight,
         false
       );
+      // Update camera aspect ratio.
       if (this._camera instanceof THREE.PerspectiveCamera) {
         this._camera.aspect =
           this._divRef.current.clientWidth / this._divRef.current.clientHeight;
@@ -678,6 +762,7 @@ export class MainView extends React.Component<IProps, IStates> {
       }
       this._camera.updateProjectionMatrix();
 
+      // Clone camera for split screen view.
       if (this._sceneL && this._cameraL) {
         this._sceneL.remove(this._cameraL);
         this._cameraL = this._camera.clone();
@@ -686,12 +771,19 @@ export class MainView extends React.Component<IProps, IStates> {
     }
   };
 
+  /**
+   * Generates the scene by setting it up, starting the animation, and resizing the canvas.
+   */
   generateScene = (): void => {
     this.sceneSetup();
     this.animate();
     this.resizeCanvasToDisplaySize();
   };
 
+  /**
+   * Sets the target position for the camera to look at.
+   * @param position The target position.
+   */
   private lookAtPosition(
     position: { x: number; y: number; z: number } | [number, number, number]
   ) {
@@ -702,6 +794,9 @@ export class MainView extends React.Component<IProps, IStates> {
     );
   }
 
+  /**
+   * Smoothly updates the camera's target to look at the target position.
+   */
   private updateCameraRotation() {
     if (this._targetPosition && this._camera && this._controls) {
       const currentTarget = this._controls.target.clone();
@@ -717,6 +812,9 @@ export class MainView extends React.Component<IProps, IStates> {
     }
   }
 
+  /**
+   * Updates the position of all annotations on the screen.
+   */
   private _updateAnnotation() {
     Object.keys(this.state.annotations).forEach(key => {
       const el = document.getElementById(key);
@@ -732,6 +830,11 @@ export class MainView extends React.Component<IProps, IStates> {
     });
   }
 
+  /**
+   * Handles changes in the JupyterCAD settings.
+   * @param _ The JupyterCAD model.
+   * @param changedKey The key of the setting that changed.
+   */
   private _handleSettingsChange(_: IJupyterCadModel, changedKey: string): void {
     if (changedKey === 'showAxesHelper' && this._sceneAxe) {
       this._sceneAxe.visible = this._model.jcadSettings.showAxesHelper;
@@ -742,6 +845,10 @@ export class MainView extends React.Component<IProps, IStates> {
     }
   }
 
+  /**
+   * Handles pointer move events to update the 3D pointer and sync with collaborators.
+   * @param e The mouse event.
+   */
   private _onPointerMove(e: MouseEvent) {
     const rect = this._renderer.domElement.getBoundingClientRect();
 
@@ -792,6 +899,10 @@ export class MainView extends React.Component<IProps, IStates> {
     }
   }
 
+  /**
+   * Performs raycasting to determine which object is under the pointer.
+   * @returns The picked result, or null if no object is picked.
+   */
   private _pick(): IPickedResult | null {
     if (this._meshGroup === null || !this._meshGroup.children) {
       return null;
@@ -849,6 +960,10 @@ export class MainView extends React.Component<IProps, IStates> {
     return null;
   }
 
+  /**
+   * Handles click events to select or deselect objects.
+   * @param e The mouse event.
+   */
   private _onClick(e: MouseEvent) {
     const selection = this._pick();
     const selectedMeshesNames = new Set(
@@ -856,6 +971,7 @@ export class MainView extends React.Component<IProps, IStates> {
     );
     if (selection) {
       const selectionName = selection.mesh.name;
+      // Handle multi-selection with Ctrl key.
       if (e.ctrlKey) {
         if (selectedMeshesNames.has(selectionName)) {
           selectedMeshesNames.delete(selectionName);
@@ -881,11 +997,16 @@ export class MainView extends React.Component<IProps, IStates> {
       this._updateSelected(newSelection);
       this._model.syncSelected(newSelection, this._mainViewModel.id);
     } else {
+      // If clicking outside an object, clear the selection.
       this._updateSelected({});
       this._model.syncSelected({}, this._mainViewModel.id);
     }
   }
 
+  /**
+   * Handles key down events, e.g., for toggling transform modes.
+   * @param event The keyboard event.
+   */
   private _onKeyDown(event: KeyboardEvent) {
     // TODO Make these Lumino commands? Or not?
     if (this._clipSettings.enabled || this._transformControls.enabled) {
@@ -907,7 +1028,25 @@ export class MainView extends React.Component<IProps, IStates> {
     }
   }
 
+  /**
+   * Converts shape data from the model into Three.js meshes.
+   * @param payload The shape data payload.
+   */
   private _shapeToMesh = (payload: IDisplayShape['payload']['result']) => {
+    // Clear existing meshes.
+    // If a temporary transform group exists (from a multi-select transform),
+    // remove it first so its children (the old instances of selected objects)
+    // don't persist and cause duplicates when we recreate `_meshGroup`.
+    if (this._transformGroup) {
+      // Detach transform controls and disable them.
+      this._transformControls.detach();
+      this._transformControls.visible = false;
+      this._transformControls.enabled = false;
+      // Remove the temporary group from the scene.
+      this._scene.remove(this._transformGroup);
+      this._transformGroup = null;
+    }
+
     if (this._meshGroup !== null) {
       this._scene.remove(this._meshGroup);
     }
@@ -927,6 +1066,7 @@ export class MainView extends React.Component<IProps, IStates> {
 
     this._meshGroup = new THREE.Group();
 
+    // Build each shape from the payload.
     Object.entries(payload).forEach(([objName, data]) => {
       const selected = selectedNames.includes(objName);
       const obj = this._model.sharedModel.getObjectByName(objName);
@@ -964,6 +1104,7 @@ export class MainView extends React.Component<IProps, IStates> {
           mainMesh.userData.originalColor = originalMeshColor.clone();
         }
 
+        // Handle selected state.
         if (selected) {
           const boundingBox = meshGroup?.getObjectByName(
             SELECTION_BOUNDING_BOX
@@ -980,6 +1121,7 @@ export class MainView extends React.Component<IProps, IStates> {
 
           this._selectedMeshes.push(mainMesh);
         }
+        // Handle edge colors.
         edgesMeshes.forEach(el => {
           this._edgeMaterials.push(el.material);
           const meshColor = new THREE.Color(objColor);
@@ -1051,6 +1193,7 @@ export class MainView extends React.Component<IProps, IStates> {
     this._scene.add(this._clippingPlaneMesh);
     this._scene.add(this._meshGroup);
 
+    // Hide loading spinner.
     if (this._loadingTimeout) {
       clearTimeout(this._loadingTimeout);
       this._loadingTimeout = null;
@@ -1058,6 +1201,10 @@ export class MainView extends React.Component<IProps, IStates> {
     this.setState(old => ({ ...old, loading: false }));
   };
 
+  /**
+   * Updates the reference length based on the bounding box of the scene.
+   * @param updateCamera Whether to update the camera position.
+   */
   private _updateRefLength(updateCamera = false): void {
     if (this._meshGroup && this._meshGroup.children.length) {
       const boxSizeVec = new THREE.Vector3();
@@ -1089,6 +1236,11 @@ export class MainView extends React.Component<IProps, IStates> {
     }
   }
 
+  /**
+   * Converts an object from a post result into a Three.js mesh.
+   * @param name The name of the object.
+   * @param postResult The post result data.
+   */
   private async _objToMesh(
     name: string,
     postResult: IPostResult
@@ -1130,6 +1282,11 @@ export class MainView extends React.Component<IProps, IStates> {
     this._updateRefLength(true);
   }
 
+  /**
+   * Handles the worker busy signal to show/hide the loading spinner.
+   * @param _ The main view model.
+   * @param busy Whether the worker is busy.
+   */
   private _workerBusyHandler(_: MainViewModel, busy: boolean) {
     if (this._loadingTimeout) {
       clearTimeout(this._loadingTimeout);
@@ -1143,6 +1300,11 @@ export class MainView extends React.Component<IProps, IStates> {
       this.setState(old => ({ ...old, loading: false }));
     }
   }
+  /**
+   * Handles the render signal to render new shapes.
+   * @param sender The main view model.
+   * @param renderData The data to be rendered.
+   */
   private async _requestRender(
     sender: MainViewModel,
     renderData: {
@@ -1206,6 +1368,10 @@ export class MainView extends React.Component<IProps, IStates> {
     }
   }
 
+  /**
+   * Updates the scale of all pointers in the scene.
+   * @param refLength The reference length to use for scaling.
+   */
   private _updatePointersScale(refLength): void {
     this._pointer3D?.mesh.scale.set(
       refLength / 10,
@@ -1222,6 +1388,11 @@ export class MainView extends React.Component<IProps, IStates> {
     }
   }
 
+  /**
+   * Creates a 3D pointer mesh for a user.
+   * @param user The user for whom to create the pointer.
+   * @returns The created pointer mesh.
+   */
   private _createPointer(user?: User.IIdentity): BasicMesh {
     let clientColor: Color.RGBColor | null = null;
 
@@ -1258,6 +1429,10 @@ export class MainView extends React.Component<IProps, IStates> {
     return mesh;
   }
 
+  /**
+   * Updates the selection of objects in the scene.
+   * @param selection The new selection.
+   */
   private _updateSelected(selection: { [key: string]: ISelection }) {
     const selectionChanged =
       JSON.stringify(selection) !== JSON.stringify(this._currentSelection);
@@ -1360,60 +1535,94 @@ export class MainView extends React.Component<IProps, IStates> {
     this._updateTransformControls(selectedNames);
   }
 
-  /*
+  /**
    * Attach the transform controls to the current selection, or detach it
    */
   private _updateTransformControls(selection: string[]) {
-    if (selection.length === 1 && !this._explodedView.enabled) {
-      const selectedMeshName = selection[0];
-
-      if (selectedMeshName.startsWith('edge')) {
-        const selectedMesh = this._meshGroup?.getObjectByName(
-          selectedMeshName
-        ) as BasicMesh;
-
-        if (selectedMesh.parent?.name) {
-          const parentName = selectedMesh.parent.name;
-
-          // Not using getObjectByName, we want the full group
-          // TODO Improve this detection of the full group. startsWith looks brittle
-          const parent = this._meshGroup?.children.find(child =>
-            child.name.startsWith(parentName)
-          );
-
-          if (parent) {
-            this._transformControls.attach(parent as BasicMesh);
-
-            this._transformControls.visible = this.state.transform;
-            this._transformControls.enabled = this.state.transform;
-          }
-        }
-        return;
-      }
-
-      // Not using getObjectByName, we want the full group
-      // TODO Improve this detection of the full group. startsWith looks brittle
-      const selectedMesh = this._meshGroup?.children.find(child =>
-        child.name.startsWith(selectedMeshName)
+    // If there's an existing transform group (for multi-object transformation),
+    // detach its children and remove it from the scene.
+    if (this._transformGroup) {
+      // Using attach to preserve world transform while reparenting
+      // We need to iterate over a copy of the array, because `attach` will modify it.
+      [...this._transformGroup.children].forEach(child =>
+        this._meshGroup!.attach(child)
       );
-
-      if (selectedMesh) {
-        this._transformControls.attach(selectedMesh as BasicMesh);
-
-        this._transformControls.visible = this.state.transform;
-        this._transformControls.enabled = this.state.transform;
-
-        return;
-      }
+      this._scene.remove(this._transformGroup);
+      this._transformGroup = null;
     }
-
-    // Detach TransformControls from the previous selection
+    // Detach transform controls from any object, hide them, and disable them.
     this._transformControls.detach();
-
     this._transformControls.visible = false;
     this._transformControls.enabled = false;
+
+    // If transformation is disabled, no objects are selected, or exploded view is active,
+    // then transformation controls should not be active.
+    if (
+      !this.state.transform ||
+      selection.length === 0 ||
+      this._explodedView.enabled
+    ) {
+      return;
+    }
+
+    // Get the unique parent groups of the selected meshes.
+    // We only consider groups that are direct children of `_meshGroup`.
+    const selectedGroups = [
+      ...new Set(
+        selection
+          .map(selectedName => {
+            // Find the mesh by name (can be recursive)
+            const mesh = this._meshGroup?.getObjectByName(selectedName);
+            // Return its parent, which should be a group
+            return mesh?.parent as THREE.Group;
+          })
+          // Filter out invalid parents and ensure they are direct children of _meshGroup
+          .filter(parent => parent && parent.parent === this._meshGroup)
+      )
+    ];
+
+    // If no valid groups are selected, return.
+    if (selectedGroups.length === 0) {
+      return;
+    }
+
+    // If only one group is selected, attach transform controls directly to it.
+    if (selectedGroups.length === 1) {
+      this._transformControls.attach(selectedGroups[0]);
+    } else {
+      // If multiple groups are selected, create a new temporary group to control them all.
+      this._transformGroup = new THREE.Group();
+      this._scene.add(this._transformGroup);
+
+      // Calculate the bounding box of all selected groups to find their center.
+      const box = new THREE.Box3();
+      selectedGroups.forEach(group => {
+        box.expandByObject(group);
+      });
+      const center = new THREE.Vector3();
+      box.getCenter(center);
+
+      // Set the position of the temporary transform group to the center of the selected objects.
+      this._transformGroup.position.copy(center);
+      this._transformGroup.updateWorldMatrix(true, false);
+
+      // Attach all selected groups to the temporary transform group.
+      selectedGroups.forEach(group => {
+        this._transformGroup!.attach(group);
+      });
+      this._transformControls.attach(this._transformGroup);
+    }
+
+    // Make transform controls visible and enabled.
+    this._transformControls.visible = true;
+    this._transformControls.enabled = true;
   }
 
+  /**
+   * Handles changes in the shared metadata, such as annotations.
+   * @param _ The JupyterCAD model.
+   * @param changes The changes in the metadata.
+   */
   private _onSharedMetadataChanged = (
     _: IJupyterCadModel,
     changes: MapChange
@@ -1441,6 +1650,11 @@ export class MainView extends React.Component<IProps, IStates> {
     this.setState(old => ({ ...old, annotations: newState, firstLoad: false }));
   };
 
+  /**
+   * Handles changes in the client shared state, for collaboration features.
+   * @param sender The JupyterCAD model.
+   * @param clients The map of clients and their states.
+   */
   private _onClientSharedStateChanged = (
     sender: IJupyterCadModel,
     clients: Map<number, IJupyterCadClientState>
@@ -1557,6 +1771,11 @@ export class MainView extends React.Component<IProps, IStates> {
     });
   };
 
+  /**
+   * Handles changes in the shared options, such as object visibility and color.
+   * @param sender The JupyterCAD model.
+   * @param change The change in the shared options.
+   */
   private _onSharedOptionsChanged(
     sender: IJupyterCadModel,
     change: MapChange
@@ -1600,6 +1819,11 @@ export class MainView extends React.Component<IProps, IStates> {
     }
   }
 
+  /**
+   * Handles changes in the view settings, such as exploded view, clipping, etc.
+   * @param sender The observable map of view settings.
+   * @param change The change in the view settings.
+   */
   private _onViewChanged(
     sender: ObservableMap<JSONValue>,
     change: IObservableMap.IChangedArgs<JSONValue>
@@ -1676,10 +1900,16 @@ export class MainView extends React.Component<IProps, IStates> {
     }
   }
 
+  /**
+   * Whether the exploded view is currently enabled.
+   */
   get explodedViewEnabled(): boolean {
     return this._explodedView.enabled && this._explodedView.factor !== 0;
   }
 
+  /**
+   * Sets up the exploded view by repositioning objects and drawing helper lines.
+   */
   private _setupExplodedView() {
     if (this.explodedViewEnabled) {
       const center = new THREE.Vector3();
@@ -1746,6 +1976,9 @@ export class MainView extends React.Component<IProps, IStates> {
     this._updateTransformControls(Object.keys(this._currentSelection || {}));
   }
 
+  /**
+   * Updates the camera type (perspective or orthographic).
+   */
   private _updateCamera() {
     const position = new THREE.Vector3().copy(this._camera.position);
     const up = new THREE.Vector3().copy(this._camera.up);
@@ -1799,6 +2032,10 @@ export class MainView extends React.Component<IProps, IStates> {
     this.resizeCanvasToDisplaySize();
   }
 
+  /**
+   * Updates the split screen view.
+   * @param enabled Whether split screen is enabled.
+   */
   private _updateSplit(enabled: boolean) {
     if (enabled) {
       if (!this._meshGroup) {
@@ -1823,6 +2060,10 @@ export class MainView extends React.Component<IProps, IStates> {
     }
   }
 
+  /**
+   * Initializes the slider for the split screen view.
+   * @param display Whether to display the slider.
+   */
   initSlider(display: boolean) {
     if (!this._mainViewRef.current) {
       return;
@@ -1887,6 +2128,9 @@ export class MainView extends React.Component<IProps, IStates> {
     }
   }
 
+  /**
+   * Updates the clipping settings.
+   */
   private _updateClipping() {
     if (this._clipSettings.enabled) {
       this._renderer.localClippingEnabled = true;
@@ -1911,6 +2155,9 @@ export class MainView extends React.Component<IProps, IStates> {
     }
   }
 
+  /**
+   * Handles theme changes to update colors.
+   */
   private _handleThemeChange = (): void => {
     DEFAULT_MESH_COLOR.set(getCSSVariableColor(DEFAULT_MESH_COLOR_CSS));
     DEFAULT_EDGE_COLOR.set(getCSSVariableColor(DEFAULT_EDGE_COLOR_CSS));
@@ -1922,11 +2169,19 @@ export class MainView extends React.Component<IProps, IStates> {
     this._clippingPlaneMeshControl.material.color = DEFAULT_MESH_COLOR;
   };
 
+  /**
+   * Handles window resize events.
+   */
   private _handleWindowResize = (): void => {
     this.resizeCanvasToDisplaySize();
     this._updateAnnotation();
   };
 
+  /**
+   * Computes the screen position of an annotation.
+   * @param annotation The annotation to compute the position for.
+   * @returns The screen position of the annotation.
+   */
   private _computeAnnotationPosition(annotation: IAnnotation): THREE.Vector2 {
     const parent = this._meshGroup?.getObjectByName(
       annotation.parent
@@ -1960,6 +2215,11 @@ export class MainView extends React.Component<IProps, IStates> {
     return screenPosition;
   }
 
+  /**
+   * Handles changes in the snap settings.
+   * @param key The key of the snap setting to change.
+   * @returns A function to handle the input change event.
+   */
   private _handleSnapChange =
     (key: 'rotationSnapValue' | 'translationSnapValue') =>
     (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -1969,10 +2229,14 @@ export class MainView extends React.Component<IProps, IStates> {
         if (key === 'rotationSnapValue' && value <= 0) {
           return;
         }
-        this.setState({ [key]: value } as Pick<this['state'], typeof key>);
+        this.setState({ [key]: value } as any);
       }
     };
 
+  /**
+   * Handles changes in the exploded view factor.
+   * @param event The input change event.
+   */
   private _handleExplodedViewChange = (
     event: React.ChangeEvent<HTMLInputElement>
   ) => {
@@ -1982,6 +2246,10 @@ export class MainView extends React.Component<IProps, IStates> {
     this._setupExplodedView();
   };
 
+  /**
+   * Renders the component.
+   * @returns The rendered JSX element.
+   */
   render(): JSX.Element {
     const isTransformOrClipEnabled =
       this.state.transform || this.state.clipEnabled;
@@ -2221,6 +2489,7 @@ export class MainView extends React.Component<IProps, IStates> {
   }; // Current mouse drag
   private _clipPlaneTransformControls: TransformControls; // Clip plane position/rotation controls
   private _transformControls: TransformControls; // Mesh position controls
+  private _transformGroup: THREE.Group | null = null;
   private _pointer3D: IPointer | null = null;
   private _clock: THREE.Clock;
   private _targetPosition: THREE.Vector3 | null = null;
